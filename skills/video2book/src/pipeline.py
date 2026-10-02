@@ -306,6 +306,7 @@ class PipelineCoordinator:
         except (OSError, TypeError, ValueError):
             return False
 
+    @staticmethod
     def _page_transcript_exists(ws: Any, block: Mapping[str, Any], page: int) -> bool:
         """块内某一集的**补录稿**是否已落盘。"""
         try:
