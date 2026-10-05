@@ -511,6 +511,7 @@ def test_wbi_auto_sticky_downgrade_on_first_failure(monkeypatch):
     避免 145 集每集都在 WBI 上白白重试 14 秒（全课程立省 33+ 分钟）。
     """
     subtitles.reset_wbi_degraded()
+    monkeypatch.setattr(subtitles.WbiSigner, "enc_wbi", lambda params, **kwargs: params)
     monkeypatch.delenv(subtitles.ENV_SUBTITLE_ENDPOINT, raising=False)
     请求记录 = []
 

@@ -316,6 +316,22 @@ def cmd_check(args):
     - `--fix-numbering`：存量产物标题手写序号就地清理（幂等，可先 `--dry-run` 预演）；
     - `--strict`：致命项才返回非零退出码（默认提示级）。
     """
+    if getattr(args, "status", False):
+        import json
+        from src.core.production import production_status
+        from src.core.quality_gate import resolve_workspaces
+        workspaces = resolve_workspaces(base_dir=args.base_dir, task=args.task, dir_path=args.dir)
+        reports = [production_status(ws.root_dir) for ws in workspaces]
+        print(json.dumps(reports[0] if len(reports) == 1 else reports, ensure_ascii=False, indent=2))
+        return int(not reports or any(not r["ok"] for r in reports))
+    if getattr(args, "production", False):
+        from src.core.quality_gate import run_production
+        return run_production(
+            base_dir=getattr(args, "base_dir", None),
+            task=getattr(args, "task", None),
+            dir_path=getattr(args, "dir", None),
+            as_json=bool(getattr(args, "json", False)),
+        )
     if getattr(args, "fix_numbering", False):
         from src.core.heading_cleanup import run_fix_numbering
         return run_fix_numbering(
@@ -710,12 +726,15 @@ def main():
     )
     p_check.add_argument("--stage1", action="store_true", help="阶段一放行门禁：模块长文是否基于本块逐字稿")
     p_check.add_argument("--deliver", action="store_true", help="交付前体检：笔记成色 + 渲染合规（默认）")
+    p_check.add_argument("--production", action="store_true",
+                         help="生产终检：产物齐备、来源覆盖、教材同步、依据与交付检查；始终严格")
     p_check.add_argument("--fix-numbering", action="store_true", dest="fix_numbering",
                          help="存量产物标题手写序号清理（默认只报不改；加 --apply 才写盘）")
     p_check.add_argument("--dir", default=None, help="直接指定单个工作区目录")
     p_check.add_argument("--task", default=None, help="仅处理目录名包含该关键字的工作区")
     p_check.add_argument("--base-dir", default=None, help=BASE_DIR_HELP)
     p_check.add_argument("--json", action="store_true", help="JSON 输出")
+    p_check.add_argument("--status", action="store_true", help="只读产物与输入指纹状态，不替代终检")
     p_check.add_argument("--strict", action="store_true", help="存在致命项才返回非零（默认提示级）")
     p_check.add_argument("--min-freq", type=int, default=2, dest="min_freq",
                          help="[--stage1] 英文标识符/数字实体的最低出现次数（默认 2；"

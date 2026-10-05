@@ -135,6 +135,24 @@ def test_next_module_payload_shape_with_transcript(run_queue, dispatch_ws):
     assert item["target_article"] in item["dispatch_prompt"], "派发词未包含目标长文路径"
 
 
+def test_first_dispatch_binds_transcript_created_after_task_export(run_queue, dispatch_ws):
+    from src.bookcore.state import statuses
+    from src.core.taskbook import export_block_article_task
+
+    block = BlockPlan.load_blocks(dispatch_ws)[0]
+    transcript = dispatch_ws.subtitles_dir / "BLK01_P01-P02_逐字稿.md"
+    export_block_article_task(dispatch_ws, block, transcript_file=transcript, article_type="learning")
+    assert statuses(dispatch_ws.root_dir)[0]["state"] == "blocked"
+    _write_transcript(dispatch_ws)
+    item = _payload(run_queue("--base-dir", str(dispatch_ws.root_dir),
+                              "--next-module", "1", "--json"))["next"][0]
+    assert statuses(dispatch_ws.root_dir)[0]["state"] == "pending"
+    Path(item["target_article"]).write_text("Article body. " * 200, encoding="utf-8")
+    assert statuses(dispatch_ws.root_dir)[0]["state"] == "ready"
+    assert _payload(run_queue("--base-dir", str(dispatch_ws.root_dir),
+                               "--next-module", "1", "--json"))["next"] == []
+
+
 def test_next_module_empty_after_article_written(run_queue, dispatch_ws):
     """模块长文已落盘（≥1000 字节）→ 该块不再派发。"""
     _write_transcript(dispatch_ws)

@@ -592,6 +592,7 @@ def find_module_article(
 ) -> Optional[Path]:
     """磁盘上已就绪的模块长文（按 `模块XX_` 前缀宽容定位，容忍标题微调与后缀差异）。"""
     root = Path(articles_dir)
+    from src.bookcore.state import output_is_current
     if not root.is_dir():
         return None
     block_id = int(block.get("block_id") or 0)
@@ -599,7 +600,7 @@ def find_module_article(
         if candidate.name.endswith("_TASK.md"):
             continue
         try:
-            if candidate.stat().st_size >= min_bytes:
+            if candidate.stat().st_size >= min_bytes and output_is_current(root.parent, candidate):
                 return candidate
         except OSError:
             continue
@@ -688,4 +689,3 @@ def workspace_title(dir_path: Path, manifest: Optional[Dict[str, Any]] = None) -
 _offline_candidate_dirs = offline_candidate_dirs
 _workspace_title = workspace_title
 _parts_from_audio = parts_from_audio
-

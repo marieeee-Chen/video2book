@@ -707,6 +707,113 @@ def check_render_workspace(
     }
 
 
+def check_production_workspace(ws: Any) -> List[str]:
+    """Final delivery checks, separate from historical formatting-only checks."""
+    from src.core.article_body import read_article_body
+    from src.core.production import production_report
+    from src.bookcore.checks import check_coverage
+    from src.bookcore.contracts import SourceRange
+
+    issues = [f"{i.code}: {i.path} {i.message}" for i in production_report(ws.root_dir).issues
+              if i.severity == "error"]
+    try:
+        plan = json.loads((ws.root_dir / "block_plan.json").read_text(encoding="utf-8"))
+        blocks = plan["blocks"]
+        if not isinstance(blocks, list) or not blocks:
+            raise ValueError("empty blocks")
+        ids = [b["block_id"] for b in blocks]
+        if any(type(bid) is not int or bid < 1 for bid in ids) or len(set(ids)) != len(ids):
+            raise ValueError("invalid/duplicate block ids")
+        if not plan.get("source", {}).get("parts"):
+            raise ValueError("missing source.parts")
+        excluded = plan.get("excluded_pages", {})
+        if not isinstance(excluded, dict) or any(not str(v).strip() for v in excluded.values()):
+            raise ValueError("excluded_pages must map page numbers to reasons")
+        sources = [SourceRange(str(p["page"]), 0, 1, "page") for p in plan["source"]["parts"]]
+        covered = {str(seg["page"]) for block in blocks
+                   for seg in [*(block.get("segments") or []), *(block.get("units") or [])]
+                   if seg.get("page")}
+        coverage = check_coverage(sources, [SourceRange(page, 0, 1, "page")
+                                          for page in covered | set(excluded)],
+                                  tool="video2book", allow_overlap=True)
+        issues.extend(f"{i.code}: {i.path} {i.message}" for i in coverage.issues)
+    except (OSError, ValueError, KeyError, TypeError) as err:
+        return [f"block_plan.json: {err}"]
+
+    books = sorted((ws.root_dir / "textbooks").glob("*_精读全书.md"))
+    if not books:
+        issues.append("缺少教材成品")
+    book_text = "\n".join(p.read_text(encoding="utf-8") for p in books)
+    for block in blocks:
+        bid = block["block_id"]
+        transcript = TaskWorkspace.block_path(ws, block)
+        if not transcript.is_file() or not transcript.read_text(encoding="utf-8").strip():
+            issues.append(f"BLK{bid:02d} 缺少非空逐字稿")
+        article = find_module_article(ws.articles_dir, block)
+        if article is None:
+            issues.append(f"BLK{bid:02d} 缺少达标长文")
+        elif read_article_body(article).strip() not in book_text:
+            issues.append(f"BLK{bid:02d} 长文尚未完整整编入教材，请重跑 cluster-articles")
+    notes = collect_notes(ws)
+    if not notes:
+        issues.append("缺少笔记成品")
+    try:
+        note_plan = json.loads((ws.root_dir / "note_plan.json").read_text(encoding="utf-8"))
+        claimed = []
+        note_ids = set()
+        if not isinstance(note_plan, list) or not note_plan:
+            raise ValueError("empty note plan")
+        for note in note_plan:
+            nid = note["note_id"]
+            if type(nid) is not int or nid <= 0 or nid in note_ids or not note.get("blocks"):
+                raise ValueError("invalid note id/blocks")
+            note_ids.add(nid)
+            if any(type(b) is not int for b in note["blocks"]):
+                raise ValueError("invalid note blocks")
+            claimed.extend(note["blocks"])
+            matches = [p for p in notes if re.match(rf"^笔记0*{nid}_", p.name)]
+            if len(matches) != 1 or not matches[0].read_text(encoding="utf-8").strip():
+                issues.append(f"笔记 {nid} 缺失、重号或为空")
+        if sorted(claimed) != sorted(ids):
+            issues.append("note_plan.json 未恰好覆盖全部块各一次")
+        if len(notes) != len(note_ids):
+            issues.append("存在计划外笔记")
+    except (OSError, ValueError, KeyError, TypeError) as err:
+        issues.append(f"note_plan.json: {err}")
+    return issues
+
+
+def run_production(*, base_dir=None, task=None, dir_path=None, as_json=False) -> int:
+    """Read-only final gate; never accepts missing products as a successful scan."""
+    import contextlib
+    import io
+
+    reports = []
+    for ws in resolve_workspaces(base_dir=base_dir, task=task, dir_path=dir_path):
+        try:
+            issues = check_production_workspace(ws)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                grounding = run_stage1(dir_path=str(ws.root_dir), strict=True)
+                delivery = run_deliver(dir_path=str(ws.root_dir), strict=True)
+            if grounding or delivery:
+                issues.append("依据或交付检查未通过")
+            reports.append({"workspace": ws.root_dir.name, "issues": issues, "checks": output.getvalue()})
+        except (OSError, ValueError, KeyError, TypeError) as err:
+            reports.append({"workspace": ws.root_dir.name, "issues": [str(err)]})
+    failed = not reports or any(r["issues"] for r in reports)
+    if as_json:
+        print(json.dumps({"ok": not failed, "reports": reports}, ensure_ascii=False, indent=2))
+    else:
+        for report in reports:
+            print(f"[{report['workspace']}] " + ("; ".join(report["issues"]) or "生产终检通过"))
+            if report["issues"]:
+                print(report.get("checks", ""))
+        if not reports:
+            print("[ERROR] 未找到工作区")
+    return int(failed)
+
+
 def run_deliver(
     *,
     base_dir: Optional[str] = None,

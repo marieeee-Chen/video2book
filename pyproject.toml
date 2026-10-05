@@ -37,6 +37,9 @@ dev = ["pytest>=7.0"]
 where = ["skills/video2book"]
 include = ["src*"]
 
+[tool.setuptools.package-data]
+"src.bookcore" = ["LICENSE", "RELEASE.json", "CONTRACT.md"]
+
 # 行为测试住在技能目录里（安装单元边界内），与扁平门禁 scripts/selfcheck.py 分工：
 # pytest 管行为，selfcheck 管便宜的入口级门禁。
 [tool.pytest.ini_options]
@@ -46,4 +49,3 @@ addopts = "-ra"
 markers = [
     "ffmpeg: 需要系统 ffmpeg/ffprobe 的用例（缺外部命令时可用 -m 'not ffmpeg' 跳过）",
 ]
-

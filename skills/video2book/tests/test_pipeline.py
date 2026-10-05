@@ -318,13 +318,13 @@ def test_textbook_keeps_article_body(textbook_probe):
     assert "正文内容。" in text
 
 
-def test_existing_volume_is_reused_without_force(textbook_probe):
-    """默认复用已存在的教材册（整编是纯工具动作，不必每次重算）。"""
+def test_unchanged_volume_is_reused_without_force(textbook_probe):
+    """内容未变时复用成品，不更新文件时间。"""
     ws, block = textbook_probe
     out = _integrate(ws, [block])[0]
-    out.write_text(out.read_text(encoding="utf-8") + "\n<!-- MARK -->\n", encoding="utf-8")
+    before = out.stat().st_mtime_ns
     _integrate(ws, [block])
-    assert "<!-- MARK -->" in out.read_text(encoding="utf-8")
+    assert out.stat().st_mtime_ns == before
 
 
 def test_force_rebuilds_existing_volume(textbook_probe):

@@ -42,10 +42,19 @@ metadata:
 【第 6 步：聚合】python src/cli.py cluster-notes "<链接或路径>"
                  python scripts/queue_tracker.py --next-note 5 --json
                  python src/cli.py cluster-articles "<链接或路径>"
-【第 7 步：体检】python src/cli.py check --deliver --strict
+【第 7 步：终检】python src/cli.py check --production --dir "<课程工作区>"
 ```
 
 `--dry-run` 只解析拓扑；`--audio-only` 完成计划、字幕、缺块音频与转录任务书后返回，不派发模块长文任务书。`--force` 只重取音频、逐字稿与任务书，不改变已锁定 BlockPlan。
+
+`pipeline` 导出任务书不等于完成写作。只有宿主写出长文、笔记并完成整编后才能终检。
+`--production` 始终严格检查来源稿、长文、计划内笔记、教材正文同步及现有依据/排版门禁。
+刻意排除的分集在 `block_plan.json` 的 `excluded_pages` 中登记集号与原因，例如 `{"2":"重复原声版本"}`；
+不要为消除检查提示而裁剪 `source.parts`。终检只检查生成侧，不自动向课程仓发布或修改只读上游。
+
+`check --status --json --dir "<工作区>"` 只读报告产物和输入指纹，不替代终检。
+输入或计划变化后先重新导出任务，处理过期稿件，再整编；重复导出不代表旧稿已更新。
+公共核心的分发、状态和兼容规则见 [生产契约](src/bookcore/CONTRACT.md)。
 
 ## 3. BlockPlan 契约
 
@@ -65,7 +74,7 @@ metadata:
 | `pipeline` | 阶段一唯一入口：元数据、BlockPlan、字幕、按需音频与任务书 |
 | `cluster-notes` | 块 → 笔记归并，导出笔记任务书 |
 | `cluster-articles` | 按块序把模块长文整编成册 |
-| `check` | `--stage1` 依据级校验 / `--deliver` 交付体检 / `--fix-numbering` 标题去号（**默认只报不改，加 `--apply` 才写盘**） |
+| `check` | `--stage1` 依据级校验 / `--deliver` 格式体检 / `--production` 完整生产终检 / `--fix-numbering` 标题去号（**默认只报不改，加 `--apply` 才写盘**） |
 | `audit-names` | 专名核对：列出长文里逐字稿查不到的英文专名，产出每课程一份 `专名核对.md`（只报告） |
 | `cleanup` | 回收已完成任务书，每类保留 1 份范本 |
 | `sync` | 以磁盘产物回填 `manifest.json` |

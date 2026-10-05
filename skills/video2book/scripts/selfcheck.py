@@ -172,7 +172,7 @@ def check_repo_separation():
         # Codex uses an empty root .git as a workspace boundary; it must not
         # become a real version-control repository containing tracked files.
         root_git = HOME_ROOT / ".git"
-        if root_git.is_dir():
+        if root_git.is_dir() and any(root_git.iterdir()):
             commits = run_quiet(
                 ["git", "-C", str(HOME_ROOT), "rev-list", "--all", "--count"],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30,
@@ -519,7 +519,11 @@ def check_host_artifacts_ignored():
         return
 
     for name in (".workbuddy", ".zcode", "output"):
-        assert (HOME_ROOT / name).exists() or name == ".zcode", f"容器根缺少 {name}"
+        # Host directories are optional: a Codex-only installation need not have
+        # ever launched WorkBuddy or ZCode. The products root remains required.
+        if name != "output" and not (HOME_ROOT / name).exists():
+            continue
+        assert (HOME_ROOT / name).exists(), f"容器根缺少 {name}"
         for repo in repos:
             try:
                 (HOME_ROOT / name).relative_to(repo)

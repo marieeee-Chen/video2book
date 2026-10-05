@@ -168,6 +168,13 @@ class BlockSynthesizer:
 
         # 语料先落成 list：下面既要渲染清单、又要统计体积，迭代器过一次就空了
         article_list = list(articles or [])
+        from src.bookcore.state import register, task_from_paths, output_is_current
+        task_inputs = [Path(p) for p in article_list]
+        plan_path = Path(ws.root_dir) / "note_plan.json"
+        if plan_path.exists():
+            task_inputs.append(plan_path)
+        register(Path(ws.root_dir), [task_from_paths(ws.root_dir, f"note:{block_meta['block_id']}",
+                 note_file, task_inputs, metadata=block_meta)])
         corpus_bytes = 0
         for item in article_list:
             try:
@@ -200,6 +207,7 @@ class BlockSynthesizer:
         if (
             cached_note is not None
             and cached_note.stat().st_size >= MIN_NOTE_BYTES
+            and output_is_current(ws.root_dir, cached_note)
             and not force
         ):
             try:
@@ -343,6 +351,8 @@ class BlockSynthesizer:
             block_titles=block_titles,
         )
         result["notes"] = notes
+        from src.bookcore.state import retain
+        retain(Path(ws.root_dir), "note:", {f"note:{n['note_id']}" for n in notes})
         result["note_status"] = note_status if notes else "deferred"
         result["merged"] = any(len(n.get("blocks") or []) > 1 for n in notes)
 

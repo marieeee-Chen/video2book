@@ -188,6 +188,10 @@ def export_block_article_task(
     )
     task_file.parent.mkdir(parents=True, exist_ok=True)
     task_file.write_text(content, encoding="utf-8")
+    from src.bookcore.state import register, task_from_paths
+    source = transcript_path or TaskWorkspace.block_path(ws, block)
+    register(Path(ws.root_dir), [task_from_paths(ws.root_dir, f"article:{block_id}", target_article,
+             [source, Path(ws.root_dir) / "block_plan.json"], metadata={"block": block, "style": resolved["key"]})])
     return task_file
 
 

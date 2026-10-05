@@ -219,6 +219,7 @@ Agent 需按任务书内的专属提示词撰写，逐条落实其中的六节�
 
 ```bash
 python src/cli.py check --deliver --strict      # 笔记成色 + 渲染合规
+python src/cli.py check --production --dir "<课程工作区>"  # 交付前必跑的完整终检
 python src/cli.py cleanup --dry-run             # 任务书回收预演（cleanup/sync 已由 cluster-* 自动执行）
 python src/cli.py sync                          # 按磁盘对账回填 manifest.json
 ```
@@ -237,7 +238,9 @@ python src/cli.py sync                          # 按磁盘对账回填 manifest
   - 后悔药：`pipeline --keep-audio` 豁免回收。重跑同一条命令即可。
   - 记账：`manifest.json` 记 `audio_purge`（`deleted` / `bytes` / `at` / `scope`），并把 `pipeline.status` 显式写成 `purged`——否则下一轮 `_save_runtime_manifest` 会因音频已不在而把它算成 `partial`，看起来像音频物化出了问题。
 
-> `check` **不在流水线上拦人**：它是交付前由主 Agent 手动跑的体检，只有 `--strict` 的致命项才返回非零退出码。
+> `check --production` 由主 Agent 在交付前运行，始终严格；失败不得宣称整门课完成。
+> 它增加产物齐备、笔记计划全覆盖、来源稿存在、长文完整入册检查，并调用依据与交付检查。
+> 普通 `--deliver` 仍可用于历史产物格式诊断，不替代完整终检。修改长文后重跑整编会更新教材，无需 `--force`。
 
 ---
 

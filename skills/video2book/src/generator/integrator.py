@@ -20,13 +20,15 @@
 """
 
 import json
+from src.bookcore.plans import validate_volume_plan
+from src.bookcore.io import write_text
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from src.core import fsutil
 from src.core.block_plan import BlockPlan
-from src.core.heading_numbers import plan_heading_cleanup
+from src.core.article_body import read_article_body
 from src.core.workspace import find_module_article, sanitize_filename
 
 # 一册的「块号 + 块 + 长文路径 + 字节数」四元组
@@ -111,51 +113,8 @@ class ArticleIntegrator:
         return volumes
 
     @classmethod
-    def validate_plan(
-        cls, plan: Sequence[Dict[str, Any]], blocks: Sequence[Dict[str, Any]]
-    ) -> Tuple[bool, str]:
-        """校验分册规划：块**恰好被认领一次**、册名非空且能看出内容、`volume_id` 合法且唯一。"""
-        if not plan:
-            return False, "分册规划为空"
-        known = [int(b.get("block_id") or 0) for b in blocks]
-        claimed: List[int] = []
-        ids: List[int] = []
-        for index, volume in enumerate(plan, 1):
-            title = str(volume.get("volume_title") or "").strip()
-            if not title:
-                return False, f"第 {index} 册缺少 volume_title（册名要能看出内容）"
-            if title in cls._VAGUE_TITLES:
-                return False, f"第 {index} 册用了空泛册名「{title}」，请写成能看出内容的主题名"
-            raw_id = volume.get("volume_id")
-            if raw_id is not None:
-                try:
-                    vid = int(raw_id)
-                except (TypeError, ValueError):
-                    return False, f"第 {index} 册的 volume_id 非法：{raw_id!r}（应为从 1 开始的整数）"
-                if vid < 1:
-                    return False, f"第 {index} 册的 volume_id 必须 >= 1，收到 {vid}"
-                ids.append(vid)
-            raw = volume.get("blocks")
-            if not isinstance(raw, list) or not raw:
-                return False, f"第 {index} 册未认领任何块"
-            for item in raw:
-                try:
-                    claimed.append(int(item))
-                except (TypeError, ValueError):
-                    return False, f"第 {index} 册的块编号非法：{item!r}"
-        dup_ids = sorted({v for v in ids if ids.count(v) > 1})
-        if dup_ids:
-            return False, f"volume_id 重复：{dup_ids}（每册的 volume_id 必须唯一）"
-        unknown = sorted({b for b in claimed if b not in known})
-        if unknown:
-            return False, f"分册规划引用了不存在的块编号: {unknown}"
-        duplicated = sorted({b for b in claimed if claimed.count(b) > 1})
-        if duplicated:
-            return False, f"同一块被多册重复认领: {duplicated}"
-        missing = sorted(set(known) - set(claimed))
-        if missing:
-            return False, f"未被任何册认领的块: {missing}"
-        return True, f"分册规划有效（{len(plan)} 册 / {len(blocks)} 个块）"
+    def validate_plan(cls, plan, blocks):
+        return validate_volume_plan(plan, blocks, vague_titles=cls._VAGUE_TITLES)
 
     @classmethod
     def salvage_plan(
@@ -491,13 +450,6 @@ class ArticleIntegrator:
         book_title = volume_titles[volume_index - 1]
         out_path = self.textbooks_dir / f"模块{volume_index:02d}_{book_title}{self.SUFFIX}"
 
-        try:
-            if out_path.exists() and out_path.stat().st_size >= min_product_bytes and not force:
-                print(f"    [cached] 教材已存在，跳过整编: {out_path.name}")
-                return out_path
-        except OSError:
-            pass
-
         volume_bytes = sum(item[3] for item in volume)
         if volume_bytes > cap:
             print(f"    [i] {out_path.name} 体量 {volume_bytes:,} 字节，超过上限 {cap:,}"
@@ -570,7 +522,8 @@ class ArticleIntegrator:
             "建议配合 `notes/` 目录下的复习笔记复盘，需要查证细节时可直接回到本册正文。",
             "",
         ]
-        out_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+        rendered = "\n".join(lines).strip() + "\n"
+        write_text(out_path, rendered, force=force)
         return out_path
 
     @staticmethod
@@ -635,65 +588,4 @@ class ArticleIntegrator:
 
     @staticmethod
     def _read_article_body(article: Path) -> str:
-        """读模块长文正文：剥掉抬头（H1 / 引用块 / 分隔线），并把章内标题降一级、剥掉手写序号。
-
-        为什么必须剥抬头：本书的章标题由本块接管，长文的 H1 与元信息引用块留在正文里会
-        与章标题打架（旧实现只剥一行，多行引用块的第二行 `>` 会残留成章首的孤立引用）。
-        为什么必须降级：长文的 `##` 与本书的章标题同级，不降级会与章标题并列成两个同层标题。
-        """
-        # errors="replace"：个别长文混入非 UTF-8 字节时不让整次整编崩掉；
-        # 去 BOM：带 BOM 的长文首行是 \ufeff# 篇名，不去会漏过抬头剥离与去号规则。
-        text = article.read_text(encoding="utf-8", errors="replace").lstrip("\ufeff")
-
-        # Normalize any unescaped literal \n in markdown text
-        norm_lines = []
-        in_c = False
-        for line in text.splitlines():
-            if line.strip().startswith("```"):
-                in_c = not in_c
-                norm_lines.append(line)
-            elif not in_c and r"\n" in line:
-                norm_lines.extend(line.replace(r"\n", "\n").splitlines())
-            else:
-                norm_lines.append(line)
-        text = "\n".join(norm_lines)
-
-        head_lines = text.strip().splitlines()
-        head_idx = 0
-        while head_idx < len(head_lines):
-            head_text = head_lines[head_idx].strip()
-            if (
-                not head_text
-                or head_text.startswith(">")
-                or re.match(r"^#\s", head_text)          # 长文 H1（篇名）：由章标题接管
-                or re.fullmatch(r"-{3,}", head_text)      # 抬头与正文之间的分隔线
-            ):
-                head_idx += 1
-                continue
-            break
-        body = "\n".join(head_lines[head_idx:])
-
-        # 先剥号、再降级（##→###、###→####）：存量长文标题带 `## 2.1 …` 这类手写序号，
-        # 不剥会与阅读器的自动编号叠成双号；新长文已由提示词要求不写序号，所以这一步幂等。
-        # 剥号走**文档级计划**：只有成序的标题才剥，孤立数字（`## 80 小时…`）动都不动。
-        # 围栏判定与上面的归一化循环保持同一口径（strip 后判定）：列表项内缩进的围栏
-        # 也是围栏，漏认会让围栏内的 `##` 被误降级、状态在两循环间失步。
-        chunk = body.strip()
-        strip_targets = {
-            item["line"]: item["after"] for item in plan_heading_cleanup(chunk)["auto"]
-        }
-        demoted = []
-        in_code = False
-        for line_no, line in enumerate(chunk.splitlines(), 1):
-            if line.strip().startswith("```"):
-                in_code = not in_code
-            if not in_code:
-                line = strip_targets.get(line_no, line)
-                if line.startswith("#### "):
-                    line = "#" + line  # becomes #####
-                elif line.startswith("### "):
-                    line = "#" + line  # becomes ####
-                elif line.startswith("## "):
-                    line = "#" + line  # becomes ###
-            demoted.append(line)
-        return "\n".join(demoted)
+        return read_article_body(article)

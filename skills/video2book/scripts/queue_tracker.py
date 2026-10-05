@@ -24,6 +24,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.core.block_plan import BlockPlan  # noqa: E402
+from src.bookcore.state import activate, output_is_current  # noqa: E402
 from src.core.console import enable_utf8_console  # noqa: E402
 from src.core.constants import DEFAULT_TRANSCRIBE_WORKERS  # noqa: E402
 from src.prompts import (  # noqa: E402
@@ -468,6 +469,7 @@ def _module_payload(ws: Path, n: int) -> List[Dict]:
         transcript = subtitles_dir / f"BLK{block_id:02d}_{span}_逐字稿.md"
         if not transcript.exists() or transcript.stat().st_size <= 0:
             continue
+        activate(ws, f"article:{block_id}")
         if _find_module_article(articles_dir, block) is not None:
             continue
         target = _module_article_path(articles_dir, block)
@@ -536,7 +538,7 @@ def _note_payload(ws: Path, n: int) -> List[Dict]:
         except OSError:
             pass
 
-        if has_done:
+        if has_done and output_is_current(ws, target_note):
             continue
 
         # 提取涵盖块说明（备查）

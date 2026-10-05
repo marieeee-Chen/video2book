@@ -1,0 +1,19 @@
+{
+  "version": "0.1.0",
+  "origin": "video2book/skills/video2book/src/bookcore",
+  "sha256": {
+    "CONTRACT.md": "3c34d5ebb173b6c3e07170237a26ddfee483633200c06f27bf602fe857802a3e",
+    "LICENSE": "0cec272164f7d365f87790556d70f1c2b1430e2382c629ea430e52129d09d157",
+    "__init__.py": "c6f45088570c5fd74e546cf17c21ee532bbf7cf2617d9c47eb433b55f16e22e3",
+    "article_body.py": "0ef0d7d5a14ec620c886bfc57d854386907bbd3f8a73472fa2d64a8947a29c42",
+    "assembly.py": "596f47451eaf5b959e1758cfe0361cc3044a63745e8d64acac281e45103de228",
+    "checks.py": "a200b120e43163f8b6bcd9fb6f932af813caf45f92f87b120598a1868a98c47d",
+    "contracts.py": "782d155b4a739265064100d4c47dacf805de9465d215a8db452f976f99b333d3",
+    "deliverable_lint.py": "cdc6c1fe4d27ef10899b8ae15531d381a43b6e90d748a5219afdd71831fe093c",
+    "heading_numbers.py": "27207f846ab9bd9935f33515a93ed80e41b9efe53082cf4ca95b86ba00c09a88",
+    "io.py": "40cd288e0cc7f7d48caadf1bcd8ed26d9ed4c527fef37bb78911f67515118507",
+    "plans.py": "2980e3fe13569a28e4fe290d2105d2e62e5113497e175a710febcf93623a9308",
+    "publish.py": "61ad2a08c2099e7c8eb7b95d3b65733eb69c257976047a228b68e02bada1ba6d",
+    "state.py": "a82b52ae8809a2eae761efb956197ac5e1dcd8907b86bd8bd997fd8061564b97"
+  }
+}

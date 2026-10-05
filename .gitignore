@@ -75,4 +75,5 @@ omni-media/
 .cli_status.json
 .subtitle_cache.json
 
-
+# Local migration compatibility link is an artifact, not part of the skill.
+/skills/video2book/output
