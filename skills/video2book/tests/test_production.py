@@ -7,8 +7,10 @@ from src.generator.integrator import ArticleIntegrator
 
 def complete_workspace(make_parts, blocks_factory):
     ws = make_parts((1,))
-    blocks = [blocks_factory(1, [1], "缓存机制")]
-    write_blocks(ws, blocks, source={"parts": [{"page": 1}]})
+    from src.core.block_plan import BlockPlan
+    plan = BlockPlan.plan_from_parts([{'page': 1, 'title': '缓存机制', 'duration': 1800}])
+    blocks = plan['blocks']
+    BlockPlan.save(ws, plan)
     text = "缓存命中复用已有结果，更新操作需要同步处理缓存失效。" * 100
     (ws.subtitles_dir / "BLK01_P01_逐字稿.md").write_text(text, encoding="utf-8")
     (ws.articles_dir / "模块01_缓存机制_精读长文.md").write_text("# 缓存机制\n\n" + text, encoding="utf-8")
@@ -48,7 +50,7 @@ def test_exclusion_requires_explicit_reason(make_parts, blocks_factory):
     ws, _ = complete_workspace(make_parts, blocks_factory)
     path = ws.root_dir / "block_plan.json"
     plan = json.loads(path.read_text(encoding="utf-8"))
-    plan["source"]["parts"].append({"page": 2})
+    plan["source"]["parts"].append({"page": 2, "duration": 600})
     path.write_text(json.dumps(plan), encoding="utf-8")
     assert check_production_workspace(ws)
     plan["excluded_pages"] = {"2": "重复的原声版本"}
@@ -102,3 +104,21 @@ def test_status_uses_shared_report_without_migration(make_parts, blocks_factory,
     assert result["schema_version"] == 1 and result["tool"] == "video2book"
     assert any(i["code"] == "untracked" for i in result["issues"])
     assert not (ws.root_dir / "production_state.json").exists()
+
+
+def test_placeholder_source_blocks_even_an_existing_book(make_parts, blocks_factory):
+    ws, _ = complete_workspace(make_parts, blocks_factory)
+    transcript = next(ws.subtitles_dir.glob('*_逐字稿.md'))
+    transcript.write_text('# 来源\n\n（本集音频以音乐/无人声为主，自动听音转录未得到可识别语音。）\n')
+    assert any('来源不完整' in s for s in check_production_workspace(ws))
+
+
+def test_partial_block_placeholder_is_not_coverage():
+    from src.core.quality_gate import transcript_source_issues
+    text = '第一集真实内容。\n\n（本集音频以音乐/无人声为主，自动听音转录未得到可识别语音。）\n'
+    assert transcript_source_issues(text)
+    assert transcript_source_issues('# BLK01\n\n> 来源：自动字幕\n')
+    assert not transcript_source_issues('# BLK01\n\n> 来源：自动字幕\n\n简短但真实的正文。')
+    assert not transcript_source_issues('课堂讨论“未得到可识别语音”的识别错误。')
+    assert transcript_source_issues('> 来源：B站平台字幕（语料库回灌）。整集字幕按块时间区间等比切片,非精确对齐。\n不相关的正文。')
+    assert transcript_source_issues('> ⚠ 本稿**不完整**：P01 未取到字幕。\n另一集的正文。')

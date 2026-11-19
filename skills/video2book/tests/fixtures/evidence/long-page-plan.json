@@ -1,0 +1,196 @@
+{
+  "source": {
+    "parts": [
+      {
+        "cid": 1496023576,
+        "url": "https://www.bilibili.com/video/BV1Yr421x77F?season_id=2618752",
+        "bvid": "BV1Yr421x77F",
+        "aid": 1402807225,
+        "season_id": 2618752,
+        "section_title": "正片",
+        "episode_index": 2,
+        "page": 2,
+        "title": "导论（下）：西方马克思主义的基本理论特征",
+        "duration": 5685.0
+      }
+    ]
+  },
+  "blocks": [
+    {
+      "block_id": 2,
+      "title": "导论（下）：西方马克思主义的基本理论特征",
+      "span": "P02上",
+      "episodes": [
+        2
+      ],
+      "units": [
+        {
+          "page": 2,
+          "label": "P02上",
+          "split": true,
+          "source_offset_sec": 0.0,
+          "start_sec": 0.0,
+          "end_sec": 2842.5,
+          "duration_sec": 2842.5,
+          "source": {
+            "cid": 1496023576,
+            "url": "https://www.bilibili.com/video/BV1Yr421x77F?season_id=2618752",
+            "bvid": "BV1Yr421x77F",
+            "aid": 1402807225,
+            "season_id": 2618752,
+            "section_title": "正片",
+            "episode_index": 2,
+            "page": 2,
+            "title": "导论（下）：西方马克思主义的基本理论特征",
+            "duration": 5685.0
+          }
+        }
+      ],
+      "segments": [
+        {
+          "page": 2,
+          "label": "P02上",
+          "start_sec": 0.0,
+          "end_sec": 2842.5,
+          "start": "00:00:00",
+          "end": "00:47:22",
+          "duration_sec": 2842.5,
+          "episode_split": true,
+          "source": {
+            "offset_sec": 0.0,
+            "metadata": {
+              "cid": 1496023576,
+              "url": "https://www.bilibili.com/video/BV1Yr421x77F?season_id=2618752",
+              "bvid": "BV1Yr421x77F",
+              "aid": 1402807225,
+              "season_id": 2618752,
+              "section_title": "正片",
+              "episode_index": 2,
+              "page": 2,
+              "title": "导论（下）：西方马克思主义的基本理论特征",
+              "duration": 5685.0
+            }
+          }
+        }
+      ],
+      "duration_sec": 2842.5,
+      "duration_min": 47.38,
+      "source": {
+        "kind": "parts",
+        "part_count": 1,
+        "pages": [
+          2
+        ],
+        "parts": [
+          {
+            "cid": 1496023576,
+            "url": "https://www.bilibili.com/video/BV1Yr421x77F?season_id=2618752",
+            "bvid": "BV1Yr421x77F",
+            "aid": 1402807225,
+            "season_id": 2618752,
+            "section_title": "正片",
+            "episode_index": 2,
+            "page": 2,
+            "title": "导论（下）：西方马克思主义的基本理论特征",
+            "duration": 5685.0
+          }
+        ],
+        "part_fingerprints": [
+          "9638f052fe8f551a6bc098ebe8ec09f725dc3cd063243a118e880b4ebb8fe2bd"
+        ],
+        "digest": "7fea03c8da6a250ba897deef6338c1a6ce808eaa884fbabdb97c6fa9311bb3e6"
+      },
+      "episode_split": true,
+      "single_episode": false,
+      "audio_ready": false
+    },
+    {
+      "block_id": 3,
+      "title": "导论（下）：西方马克思主义的基本理论特征",
+      "span": "P02下",
+      "episodes": [
+        2
+      ],
+      "units": [
+        {
+          "page": 2,
+          "label": "P02下",
+          "split": true,
+          "source_offset_sec": 2842.5,
+          "start_sec": 2842.5,
+          "end_sec": 5685.0,
+          "duration_sec": 2842.5,
+          "source": {
+            "cid": 1496023576,
+            "url": "https://www.bilibili.com/video/BV1Yr421x77F?season_id=2618752",
+            "bvid": "BV1Yr421x77F",
+            "aid": 1402807225,
+            "season_id": 2618752,
+            "section_title": "正片",
+            "episode_index": 2,
+            "page": 2,
+            "title": "导论（下）：西方马克思主义的基本理论特征",
+            "duration": 5685.0
+          }
+        }
+      ],
+      "segments": [
+        {
+          "page": 2,
+          "label": "P02下",
+          "start_sec": 0.0,
+          "end_sec": 2842.5,
+          "start": "00:00:00",
+          "end": "00:47:22",
+          "duration_sec": 2842.5,
+          "episode_split": true,
+          "source": {
+            "offset_sec": 2842.5,
+            "metadata": {
+              "cid": 1496023576,
+              "url": "https://www.bilibili.com/video/BV1Yr421x77F?season_id=2618752",
+              "bvid": "BV1Yr421x77F",
+              "aid": 1402807225,
+              "season_id": 2618752,
+              "section_title": "正片",
+              "episode_index": 2,
+              "page": 2,
+              "title": "导论（下）：西方马克思主义的基本理论特征",
+              "duration": 5685.0
+            }
+          }
+        }
+      ],
+      "duration_sec": 2842.5,
+      "duration_min": 47.38,
+      "source": {
+        "kind": "parts",
+        "part_count": 1,
+        "pages": [
+          2
+        ],
+        "parts": [
+          {
+            "cid": 1496023576,
+            "url": "https://www.bilibili.com/video/BV1Yr421x77F?season_id=2618752",
+            "bvid": "BV1Yr421x77F",
+            "aid": 1402807225,
+            "season_id": 2618752,
+            "section_title": "正片",
+            "episode_index": 2,
+            "page": 2,
+            "title": "导论（下）：西方马克思主义的基本理论特征",
+            "duration": 5685.0
+          }
+        ],
+        "part_fingerprints": [
+          "9638f052fe8f551a6bc098ebe8ec09f725dc3cd063243a118e880b4ebb8fe2bd"
+        ],
+        "digest": "7fea03c8da6a250ba897deef6338c1a6ce808eaa884fbabdb97c6fa9311bb3e6"
+      },
+      "episode_split": true,
+      "single_episode": false,
+      "audio_ready": false
+    }
+  ]
+}

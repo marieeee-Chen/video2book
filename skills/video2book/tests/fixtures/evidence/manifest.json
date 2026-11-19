@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "upstream_sha": "730878a88fee4531b4e1c8a650a32ac6ad1aa177",
+  "course_sha": "a27de1cd5c3df4c751d57082b1424ce3155c250f",
+  "cases": [
+    {
+      "case": "formula_course",
+      "fixture": "formula-broken.md",
+      "sha256": "9e7ef11a5fdf48613c6e52e29d3a3adc058d073577637e13d52f304377a3e84c",
+      "source": "video2book-courses/数学/微积分/宋浩高等数学2.0版/textbooks/模块01_映射、函数与基本初等函数_精读全书.md",
+      "source_sha256": "96062ad5c6133f48a65143416ceb44566e25c538a9f92f74fd77b20da04f68dd",
+      "expected": "fatal_formula_breaks"
+    },
+    {
+      "case": "contaminated_article",
+      "fixture": "self-talk.md",
+      "sha256": "1bebfdb3fe1a797c4cfd4698e304c8359c6a3433e264a61d5f11a4a01e24d46c",
+      "source": "video2book-courses/数学/微积分/宋浩高等数学2.0版/textbooks/模块11_向量代数与空间解析几何（下）_精读全书.md",
+      "source_sha256": "ba67387ce119fd4e233d7f6a5e90471a179b2a3b97bcf0e3072b1abcad128a8e",
+      "expected": "fatal_cot_leaks"
+    },
+    {
+      "case": "ambiguous_example",
+      "fixture": "ambiguous-vector-source.md",
+      "sha256": "6f34e4331bacc16ea1c6caf17dbe39babc220519c4460ad850d5d45d143f4143",
+      "source": "video2book-courses/数学/微积分/宋浩高等数学2.0版/subtitles/BLK110_P118_逐字稿.md",
+      "source_sha256": "cbbdee3a51fb74b0e3d5c48f6af9a204f0b941785f0a66450f0f08a2eb14b4c0",
+      "expected": "content_review_required; no guessed coordinates"
+    },
+    {
+      "case": "long_episode_split",
+      "fixture": "long-page-plan.json",
+      "sha256": "c8cee5ba7e2f5475e9d6d38c6f674fef8aced89d24639533401c571343fa4e9c",
+      "source": "output/西方马克思主义哲学_BV1GJ4m1j7FR/block_plan.json",
+      "source_sha256": "9e0ebfa096e71a50f622b1636096f3d1a5c294f3405814c5a2689054c9748e83",
+      "expected": "full_pass; missing_second_block_fails"
+    },
+    {
+      "case": "available_subtitles",
+      "fixture": "platform-subtitle.srt",
+      "sha256": "ec5a13273b1091a73cae44a9b6e0535b25ad3f7481381638c97b32991575ddad",
+      "source": "output/西方马克思主义哲学_BV1GJ4m1j7FR/media/P03_BV1HC41157ns.ai-zh.srt",
+      "source_sha256": "ec5a13273b1091a73cae44a9b6e0535b25ad3f7481381638c97b32991575ddad",
+      "expected": "parse_timestamps; coverage_stats_not_semantic_approval"
+    },
+    {
+      "case": "missing_subtitles",
+      "fixture": "missing-subtitles.json",
+      "sha256": "fd170ba27d64db98edcacee0ca237dd432c0fb42891d9c9c275cd2d8835af778",
+      "source": "output/【读书笔记】硬核大脑 part I_BV1zb4y1a7JU/manifest.json",
+      "source_sha256": "85df13bd13c93a4b32359446bc5752fc1d50f3cb1ce5ba168262e2d28abaa83d",
+      "expected": "requires_audio_channel; never infer complete from article presence"
+    },
+    {
+      "case": "local_media",
+      "test": "test_failed_concat_never_becomes_cache_and_retry_decodes",
+      "source": "real FFmpeg-generated 6-second tone",
+      "expected": "decoding and cache checks pass; no speech-review claim"
+    },
+    {
+      "case": "mixed_block",
+      "test": "test_missing_mixed_leg_rebuilt_even_when_block_cache_exists",
+      "source": "real FFmpeg range fixture",
+      "expected": "exact missing leg regenerated"
+    },
+    {
+      "case": "overseas_video",
+      "source": "https://www.youtube.com/watch?v=BaW_jenozKc",
+      "observed": "TLS/SSL EOF from xueqiu",
+      "technical_status": "blocked_external_network",
+      "content_status": "not_reviewed",
+      "expected": "report failure; no ready artifact"
+    }
+  ]
+}

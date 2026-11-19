@@ -10,11 +10,14 @@ BlockPlan 决定模块边界；本模块只把计划中的源分集音频变成�
 from __future__ import annotations
 
 import shutil
+import json
+import math
 import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
+from .audio_evidence import promote, receipt_path, sha256, temporary, valid_cache
 from .block_plan import BlockPlan
 from .local_media import TRANSCODE_TIMEOUT_SEC
 from .proc import run_quiet
@@ -69,6 +72,9 @@ class AudioMaterializer:
                 )
             unit_duration = float(unit.get("duration_sec") or 0.0)
             segment_duration = float(segment.get("duration_sec") or 0.0)
+            start = float(unit.get('source_offset_sec') or 0.0)
+            if not all(math.isfinite(v) for v in (unit_duration, segment_duration, start)) or unit_duration <= 0 or start < 0:
+                raise AudioMaterializationError('音频计划必须包含有限、正时长和非负源起点')
             if abs(unit_duration - segment_duration) > 0.05:
                 raise AudioMaterializationError(
                     f"BLK{int(block.get('block_id') or 0):02d} 第 {index + 1} 个切片时长不一致"
@@ -95,16 +101,24 @@ class AudioMaterializer:
         if page in cache:
             return cache[page]
         target = cls.source_audio_path(ws, part)
-        if target.exists() and target.stat().st_size >= 10240 and not force:
+        identity = {'kind': 'source', 'part': dict(part), 'course': info}
+        local = part.get('filepath')
+        if local and Path(local).is_file() and Path(local).resolve() != target.resolve():
+            identity['local_sha256'] = sha256(local)
+        if not force and valid_cache(target, identity):
             cache[page] = target
             return target
-        target.parent.mkdir(parents=True, exist_ok=True)
+        temp = temporary(target)
         try:
-            fetched = Path(fetch_episode(dict(part), target))
+            fetched = Path(fetch_episode(dict(part), temp))
+            if fetched.resolve() != temp.resolve():
+                shutil.copyfile(fetched, temp)
+            promote(temp, target, identity, duration=BlockPlan._record_duration(part))
+            fetched = target
         except Exception as err:
-            raise AudioMaterializationError(f"P{page:02d} 音频下载失败：{err}") from err
-        if not fetched.exists() or fetched.stat().st_size <= 0:
-            raise AudioMaterializationError(f"P{page:02d} 音频下载后没有有效文件")
+            raise AudioMaterializationError(f"P{page:02d} 音频获取/校验失败：{err}") from err
+        finally:
+            temp.unlink(missing_ok=True)
         cache[page] = fetched
         return fetched
 
@@ -123,7 +137,6 @@ class AudioMaterializer:
 
         同一源分集在多个 split 块中只取音一次；物化过程不写回 BlockPlan。
         """
-        del info  # 物理层通过注入的 fetch_episode 取得 info；保留参数用于调用方契约清晰。
         result: Dict[int, Path] = {}
         source_cache: Dict[int, Path] = {}
         for raw_block in blocks:
@@ -131,10 +144,6 @@ class AudioMaterializer:
             cls._validate_block_shape(block)
             block_id = int(block.get("block_id") or 0)
             target = cls.block_audio_path(ws, block)
-            if target.exists() and target.stat().st_size > 0 and not force:
-                result[block_id] = target
-                continue
-
             source_files: List[Path] = []
             for unit in block.get("units") or []:
                 page = int(unit.get("page") or 0)
@@ -144,19 +153,21 @@ class AudioMaterializer:
                         f"BLK{block_id:02d} 缺少分集元数据 P{page:02d}，无法物化音频"
                     )
                 source = cls._ensure_source_audio(
-                    ws, {}, part, fetch_episode, source_cache, force=force
+                    ws, {k: info[k] for k in ("bvid", "id", "url", "platform") if k in info}, part, fetch_episode, source_cache, force=force
                 )
                 if not unit.get("split"):
                     source_files.append(source)
                     continue
                 label = str(unit.get("label") or f"P{page:02d}")
                 sliced = cls.parts_dir(ws) / f"BLK{block_id:02d}_{label}.m4a"
-                if not (sliced.exists() and sliced.stat().st_size > 0) or force:
+                slice_identity = {'kind': 'slice', 'unit': unit, 'source_sha256': sha256(source)}
+                if not valid_cache(sliced, slice_identity) or force:
                     cls._slice_unit(
                         source,
                         sliced,
                         float(unit.get("source_offset_sec") or 0.0),
                         float(unit.get("duration_sec") or 0.0),
+                        identity=slice_identity,
                     )
                 source_files.append(sliced)
 
@@ -165,7 +176,10 @@ class AudioMaterializer:
             if len(source_files) == 1 and not block.get("episode_split"):
                 result[block_id] = source_files[0]
                 continue
-            cls._concat(target, source_files)
+            identity = {'kind': 'block', 'units': block['units'],
+                        'inputs': [sha256(p) for p in source_files]}
+            if force or not valid_cache(target, identity):
+                cls._concat(target, source_files, identity=identity, duration=float(block['duration_sec']))
             result[block_id] = target
         return result
 
@@ -257,7 +271,19 @@ class AudioMaterializer:
                 "dry_run": bool(dry_run), "reason": "audio/ 目录不存在，无需回收",
             }
 
-        未满足 = cls._missing_completion_reasons(ws, blocks)
+        # The deletion scope is the full plan, never the caller's selected subset.
+        try:
+            plan = json.loads(BlockPlan.path(ws).read_text(encoding='utf-8'))
+            all_blocks = plan['blocks']
+            if not blocks or not all_blocks:
+                raise ValueError('块清单为空')
+            未满足 = cls._missing_completion_reasons(ws, all_blocks)
+            approval = json.loads((Path(ws.root_dir) / 'audio_release.json').read_text(encoding='utf-8'))
+            if (approval.get('decision') != 'approved' or not approval.get('reviewer')
+                    or not approval.get('reason') or approval.get('dependencies') != cls.release_dependencies(ws)):
+                未满足.append('音频回收批准缺失或已失效')
+        except (OSError, ValueError, KeyError, TypeError) as err:
+            未满足 = ['音频回收批准/完整计划不可验证：' + str(err)]
         if 未满足:
             return {
                 "purged": False, "deleted": 0, "bytes": 0, "failed": [],
@@ -267,7 +293,10 @@ class AudioMaterializer:
         # 只按类型精确匹配，绝不递归删目录：块目录里可能混有 ffmpeg 清单文本，
         # 工作区里可能有嵌套的 x/ 子工作区，都不是回收对象。
         targets = sorted(
-            (p for p in audio_dir.rglob("*.m4a") if p.is_file()),
+            (p for pattern in ('P*.m4a', 'blocks/BLK*.m4a', 'blocks/_parts/BLK*.m4a')
+             for p in audio_dir.glob(pattern) if p.is_file() and not p.is_symlink()
+             and p.resolve().is_relative_to(audio_dir.resolve()) and valid_cache(p)
+             and any(cls.cache_matches(p, b) for b in all_blocks)),
             key=lambda p: len(p.parts),
             reverse=True,          # 先删深层（_parts），再删上层
         )
@@ -289,6 +318,7 @@ class AudioMaterializer:
                 continue
             try:
                 path.unlink()
+                receipt_path(path).unlink(missing_ok=True)
             except OSError as err:
                 # 失败与「无事可做」分开记：混在一起会把真实故障说成已清理。
                 failed.append({"file": str(path), "error": str(err)})
@@ -302,7 +332,7 @@ class AudioMaterializer:
             "bytes": freed,
             "failed": failed,
             "dry_run": bool(dry_run),
-            "reason": "四条件齐备（逐字稿/长文/笔记/教材）",
+            "reason": "完整计划已完成且回收批准匹配当前依赖；仅删除有校验记录的音频",
         }
 
     @staticmethod
@@ -317,55 +347,81 @@ class AudioMaterializer:
         }
 
     @staticmethod
-    def _slice_unit(source: Path, dest: Path, start_sec: float, duration_sec: float) -> None:
-        ffmpeg = shutil.which("ffmpeg")
-        if not ffmpeg:
-            raise AudioMaterializationError("音频物化需要 FFmpeg，请确认 ffmpeg 在 PATH 中")
-        cmd = [
-            ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-            "-ss", str(round(max(0.0, start_sec), 3)),
-            "-i", str(source),
-            "-t", str(round(max(0.0, duration_sec), 3)),
-            "-c", "copy", "-avoid_negative_ts", "make_zero",
-            str(dest),
-        ]
+    def cache_matches(path, block):
+        if not valid_cache(path):
+            return False
         try:
-            result = run_quiet(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, timeout=TRANSCODE_TIMEOUT_SEC,
-            )
-        except subprocess.TimeoutExpired as err:
-            raise AudioMaterializationError(f"音频切分超时：{dest.name}") from err
-        if result.returncode != 0 or not dest.exists() or dest.stat().st_size == 0:
-            detail = (result.stderr or "").strip()[:300]
-            raise AudioMaterializationError(f"音频切分失败：{dest.name}；{detail}")
+            identity = json.loads(receipt_path(path).read_text(encoding='utf-8'))['identity']
+            units = block.get('units', [])
+            if identity.get('kind') == 'block':
+                return identity.get('units') == units
+            if identity.get('kind') == 'slice':
+                return identity.get('unit') in units
+            if identity.get('kind') == 'source':
+                part = identity.get('part', {})
+                return any(all(part.get(k) == u.get('source', {}).get(k)
+                               for k in ('page', 'cid', 'url', 'filepath', 'duration')) for u in units)
+            return False
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
 
     @staticmethod
-    def _concat(target: Path, sources: Sequence[Path]) -> None:
-        ffmpeg = shutil.which("ffmpeg")
+    def release_dependencies(ws):
+        root = Path(ws.root_dir)
+        paths = [root / n for n in ('block_plan.json', 'note_plan.json', 'textbook_plan.json') if (root / n).is_file()]
+        for folder in ('subtitles', 'articles', 'notes', 'textbooks'):
+            paths.extend(p for p in (root / folder).glob('*') if p.is_file() and p.suffix in ('.md', '.txt'))
+        return {str(p.relative_to(root)): sha256(p) for p in sorted(paths)}
+
+    @staticmethod
+    def _slice_unit(source: Path, dest: Path, start_sec: float, duration_sec: float, *, identity=None) -> None:
+        ffmpeg = shutil.which('ffmpeg')
         if not ffmpeg:
-            raise AudioMaterializationError("音频拼接需要 FFmpeg，请确认 ffmpeg 在 PATH 中")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        list_file = target.parent / f"_{target.stem}_concat.txt"
-        lines = [f"file '{Path(source).as_posix().replace(chr(39), chr(39) + chr(92) + chr(39) + chr(39))}'" for source in sources]
-        list_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        cmd = [
-            ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-            "-f", "concat", "-safe", "0", "-i", str(list_file),
-            "-c", "copy", str(target),
-        ]
+            raise AudioMaterializationError('音频物化需要 FFmpeg')
+        temp = temporary(dest)
+        input_sha = sha256(source)
         try:
-            result = run_quiet(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, timeout=TRANSCODE_TIMEOUT_SEC,
-            )
-        except subprocess.TimeoutExpired as err:
-            raise AudioMaterializationError(f"音频拼接超时：{target.name}") from err
+            result = run_quiet([
+                ffmpeg, '-hide_banner', '-loglevel', 'error', '-y',
+                '-ss', str(start_sec), '-i', str(source), '-t', str(duration_sec),
+                '-c:a', 'aac', '-avoid_negative_ts', 'make_zero', str(temp),
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=TRANSCODE_TIMEOUT_SEC)
+            if result.returncode:
+                raise ValueError((result.stderr or '')[:300])
+            if sha256(source) != input_sha:
+                raise ValueError('Source changed while slicing')
+            promote(temp, dest, identity or {'kind': 'slice', 'start': start_sec, 'duration': duration_sec},
+                    inputs=[source], duration=duration_sec)
+        except (OSError, ValueError, subprocess.TimeoutExpired) as err:
+            raise AudioMaterializationError(f'音频切分失败：{dest.name}；{err}') from err
+        finally:
+            temp.unlink(missing_ok=True)
+
+    @staticmethod
+    def _concat(target: Path, sources: Sequence[Path], *, identity=None, duration=None) -> None:
+        ffmpeg = shutil.which('ffmpeg')
+        if not ffmpeg:
+            raise AudioMaterializationError('音频物化需要 FFmpeg')
+        temp = temporary(target)
+        list_file = temporary(target.with_suffix('.txt'))
+        input_hashes = [sha256(p) for p in sources]
+        # Absolute POSIX paths work even when the workspace is passed relatively.
+        lines = ["file '" + Path(source).resolve().as_posix().replace("'", "'\\''") + "'" for source in sources]
+        try:
+            list_file.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+            result = run_quiet([ffmpeg, '-hide_banner', '-loglevel', 'error', '-y',
+                               '-f', 'concat', '-safe', '0', '-i', str(list_file), '-c', 'copy', str(temp)],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=TRANSCODE_TIMEOUT_SEC)
+            if result.returncode:
+                raise ValueError((result.stderr or '')[:300])
+            if [sha256(p) for p in sources] != input_hashes:
+                raise ValueError('Sources changed while concatenating')
+            promote(temp, target, identity or {'kind': 'concat'}, inputs=sources, duration=duration)
+        except (OSError, ValueError, subprocess.TimeoutExpired) as err:
+            raise AudioMaterializationError(f'音频拼接失败：{target.name}；{err}') from err
         finally:
             list_file.unlink(missing_ok=True)
-        if result.returncode != 0 or not target.exists() or target.stat().st_size == 0:
-            detail = (result.stderr or "").strip()[:300]
-            raise AudioMaterializationError(f"音频拼接失败：{target.name}；{detail}")
+            temp.unlink(missing_ok=True)
 
 
-__all__ = ["AudioMaterializer", "AudioMaterializationError"]
+__all__ = ['AudioMaterializer', 'AudioMaterializationError']

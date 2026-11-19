@@ -17,7 +17,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import re
 import sys
 from collections import Counter
@@ -101,6 +103,24 @@ FILLER_TOKENS = frozenset({
     "course", "lecture", "video", "class", "test", "hello",
 })
 
+# 普通英语功能词不应要求中文教材逐字照抄。保留有技术含义的
+# key/value/number/row/column/right/start/end/where 等词；不修猜 ASR。
+# 同名代码标识符、SQL 运算符和大写缩写仍参与计数。
+EN_STOP_WORDS = frozenset("""
+the a an and or but if then else than that this these those
+are was were be been being have has had do does did
+can could would should will shall may might must
+you your yours we our ours they their theirs them he his she her hers
+its itself ourselves themselves who whom whose which what how why
+with without from into onto upon about above below between through
+for of to in on at by as is it us not all any each every both
+some many much more most few less least such same other another
+there here when while whereupon again also very just only already
+first second third one two three once back
+""".split())
+_CODE_SPAN_RE = re.compile(r"```.*?```|~~~.*?~~~|`[^`\n]+`", re.S)
+_TRANSCRIPT_SOURCE_LABEL_RE = re.compile(r"^\[(?:听音转录|B站字幕|B 站字幕)\s*[·•].*\]$")
+
 # 中文停用字：虚词、连接词、代词、数量词、口头禅。骨架法把连续汉字段里的
 # 这些字删掉，剩下的就是术语核心（「這個資料庫系統」→「数据库系统」）。
 CN_STOP_CHARS = frozenset(
@@ -160,9 +180,14 @@ def extract_entities(text: str, min_freq: int) -> Counter:
     """
     body = _TIMESTAMP_BLOCK_RE.sub(" ", text or "")
     counter: Counter = Counter()
+    code_spans = [(m.start(), m.end()) for m in _CODE_SPAN_RE.finditer(body)]
     for match in _TOKEN_RE.finditer(body):
-        token = match.group(0).lower()
-        if token in FILLER_TOKENS:
+        raw = match.group(0)
+        token = raw.lower()
+        in_code = any(start <= match.start() < end for start, end in code_spans)
+        if token in FILLER_TOKENS and not in_code:
+            continue
+        if token in EN_STOP_WORDS and not (in_code or raw.isupper()):
             continue
         counter[token] += 1
     for match in _NUMBER_RE.finditer(body):
@@ -213,7 +238,8 @@ def strip_transcript_header(text: str) -> str:
     起点 = 0
     for idx, 行 in enumerate(段):
         条 = 行.strip()
-        if not 条 or 条.startswith("#") or 条.startswith(">"):
+        if (not 条 or 条.startswith("#") or 条.startswith(">")
+                or _TRANSCRIPT_SOURCE_LABEL_RE.fullmatch(条)):
             起点 = idx + 1
             continue
         break
@@ -318,6 +344,12 @@ def check_grounding_workspace(ws: TaskWorkspace, min_freq: int, min_coverage: fl
         check_grounding_block(ws, b, min_freq, min_coverage)
         for b in blocks if isinstance(b, dict)
     ]
+    source_issues = check_transcript_ranges_workspace(ws, blocks)
+    affected = {bid for issue in source_issues for bid in issue["block_ids"]}
+    for entry in entries:
+        if entry["block_id"] in affected:
+            entry["grounding_status"] = entry["status"]
+            entry["status"] = "source_issue"
     checked = [e for e in entries if e["status"] in ("ok", "low_coverage")]
     low = [e for e in checked if e["status"] == "low_coverage"]
     unverifiable = [e for e in entries if e["status"] == "unverifiable"]
@@ -338,6 +370,8 @@ def check_grounding_workspace(ws: TaskWorkspace, min_freq: int, min_coverage: fl
         "no_article": len([e for e in entries if e["status"] == "no_article"]),
         "no_entities": len([e for e in entries if e["status"] == "no_entities"]),
         "read_error": len([e for e in entries if e["status"] == "read_error"]),
+        "source_issue": len(affected),
+        "source_issues": source_issues,
         "avg_coverage": avg,
         "min_coverage": min_coverage,
         "min_freq": min_freq,
@@ -384,6 +418,8 @@ def run_stage1(
                   f"{report['no_article']} 块无模块长文、{report['no_entities']} 块逐字稿无重复技术实体、"
                   f"{report['read_error']} 块读取失败）")
             print(f"    达标 {report['ok']} | 低于下限 {report['low_coverage']} | 平均覆盖 {avg}")
+            for issue in report["source_issues"]:
+                print(f"    [✗] 来源范围：{issue['detail']}")
             for entry in report["low_entries"][:12]:
                 en_c = entry.get("coverage")
                 cn_c = entry.get("cn_coverage")
@@ -397,7 +433,7 @@ def run_stage1(
                     print(f"         └ 逐字稿里高频但长文未出现：{'、'.join(_miss)}")
             if report["low_coverage"] > 12:
                 print(f"    … 其余 {report['low_coverage'] - 12} 块见 --json 输出")
-            if report["checked"] and report["low_coverage"] == 0:
+            if report["checked"] and report["low_coverage"] == 0 and not report["source_issue"]:
                 print("    ── 全部达标")
             if not report["checked"]:
                 print("    ── 无可校验的块（尚无块级逐字稿 / 尚无模块长文 / 逐字稿里没有重复出现的"
@@ -408,7 +444,10 @@ def run_stage1(
     any_low = any(r["low_coverage"] > 0 for r in reports)
     any_no_article = any(r["no_article"] > 0 for r in reports)
     any_unready = any(r["total"] > 0 and r["checked"] == 0 for r in reports)
-    if (any_low or any_no_article or any_unready) and strict:
+    any_source_issue = any(r["source_issue"] > 0 for r in reports)
+    if (any_low or any_no_article or any_unready or any_source_issue) and strict:
+        if any_source_issue:
+            print("[FAIL] 同一来源的不重叠时域复用了无时间轴的相同长正文；需核验来源范围")
         if any_no_article:
             print("[FAIL] 存在块尚未产出模块长文（阶段一长文未就绪）")
         elif any_unready:
@@ -417,7 +456,7 @@ def run_stage1(
             print("[FAIL] 存在模块长文未达依据覆盖率下限（详见上方 [✗]）")
         return 1
     if not as_json:
-        has_warnings = any_low or any_no_article or any_unready
+        has_warnings = any_low or any_no_article or any_unready or any_source_issue
         print("[OK] 依据级校验完成" + ("（提示级：加 --strict 可纳入门禁）" if has_warnings else ""))
     return 0
 
@@ -665,7 +704,7 @@ def check_render_workspace(
         lint = lint_render(text)
         summary = summarize_render(lint)
         for key, value in summary.items():
-            totals[key] += value
+            totals[key] = totals.get(key, 0) + value
         # 标题手写序号：阅读器会自动编号，两套号会叠成「1. 第 1 章」这种双号。
         numbered = lint_heading_numbers(text)
         totals["numbered_headings"] += len(numbered)
@@ -686,6 +725,9 @@ def check_render_workspace(
                 "stray_art": lint["stray_art"][:3],
                 "fence_without_lang": lint["fence_without_lang"][:3],
                 "numbered_headings": numbered[:3],
+                "formula_breaks": lint["formula_breaks"][:3],
+                "cot_leaks": lint["cot_leaks"][:3],
+                "duplicate_headings": lint["duplicate_headings"][:3],
             },
         })
 
@@ -707,12 +749,133 @@ def check_render_workspace(
     }
 
 
+def _source_ranges(block: Mapping[str, Any]) -> List[List[Any]]:
+    """CID + original-video seconds. Unit start/end already include the offset.
+
+    Segment start/end are block-relative; never add source_offset_sec to unit
+    start_sec a second time (split lower halves would exceed video duration).
+    """
+    ranges = []
+    for unit in block.get("units") or []:
+        try:
+            cid = unit["source"]["cid"]
+            start, end = float(unit["start_sec"]), float(unit["end_sec"])
+            if (type(cid) is not int or cid <= 0 or not math.isfinite(start)
+                    or not math.isfinite(end) or not 0 <= start < end):
+                return []
+            ranges.append([cid, start, end])
+        except (KeyError, TypeError, ValueError):
+            return []
+    return sorted(ranges)
+
+
+def _verified_repeated_range(ws: Any, block: Mapping[str, Any], transcript: Path) -> bool:
+    """An explicit review binds exact ranges and current bytes to checked evidence.
+
+    source_range_review.json is an opt-in review index, never generated by the
+    gate. A filename, ready flag, generic source pass or range_verified alone
+    cannot exempt a block. This checks evidence bindings, not reviewer honesty.
+    """
+    try:
+        reviews = json.loads((ws.root_dir / "source_range_review.json").read_text(encoding="utf-8"))
+        matches = [r for r in reviews["reviews"] if r["block_id"] == block["block_id"]]
+        if len(matches) != 1:
+            return False
+        review = matches[0]
+        ranges = _source_ranges(block)
+        if (not ranges or review.get("ranges") != ranges
+                or review.get("range_verified") is not True
+                or review.get("repeated_body_verified") is not True
+                or not str(review.get("reviewer") or "").strip()
+                or not str(review.get("reason") or "").strip()
+                or review.get("transcript_sha256") != hashlib.sha256(transcript.read_bytes()).hexdigest()):
+            return False
+        evidence = review.get("evidence")
+        if not isinstance(evidence, list) or not evidence:
+            return False
+        for item in evidence:
+            if not isinstance(item, dict) or not str(item.get("method") or "").strip():
+                return False
+            path = Path(item["path"])
+            if not path.is_absolute():
+                path = ws.root_dir / path
+            # The claimed transcript or plan cannot serve as its own proof.
+            if path.resolve() in {transcript.resolve(),
+                                  (ws.root_dir / "block_plan.json").resolve(),
+                                  (ws.root_dir / "source_range_review.json").resolve()}:
+                return False
+            raw = path.read_bytes()
+            if not raw or hashlib.sha256(raw).hexdigest() != item["sha256"]:
+                return False
+        return True
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def check_transcript_ranges_workspace(ws: Any, blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Detect identical long, untimed bodies assigned to disjoint ranges of a CID."""
+    groups: Dict[tuple, List[Dict[str, Any]]] = {}
+    for block in blocks:
+        path = TaskWorkspace.block_path(ws, block)
+        try:
+            body = strip_transcript_header(path.read_text(encoding="utf-8")).strip()
+        except OSError:
+            continue
+        # Exact full-body equality, not excerpts, similarity or short refrains.
+        if len(body) < 1000 or _TIMESTAMP_BLOCK_RE.search(body):
+            continue
+        ranges = _source_ranges(block)
+        body_sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        for cid in sorted({r[0] for r in ranges}):
+            groups.setdefault((cid, body_sha), []).append({
+                "block_id": block["block_id"], "transcript": str(path),
+                "body_chars": len(body), "ranges": [r for r in ranges if r[0] == cid],
+                "verified": _verified_repeated_range(ws, block, path),
+            })
+    issues = []
+    for (cid, body_sha), members in groups.items():
+        affected = set()
+        for i, left in enumerate(members):
+            for right in members[i + 1:]:
+                disjoint = all(a[2] <= b[1] or b[2] <= a[1]
+                               for a in left["ranges"] for b in right["ranges"])
+                if disjoint and not (left["verified"] and right["verified"]):
+                    affected.update((left["block_id"], right["block_id"]))
+        if affected:
+            ids = sorted(affected)
+            issues.append({
+                "kind": "duplicate_untimed_source_ranges", "cid": cid,
+                "block_ids": ids, "body_sha256": body_sha,
+                "members": [m for m in members if m["block_id"] in affected],
+                "detail": f"CID {cid} 的块 {ids} 时域互不重叠，却使用完全相同的千字以上无时间轴正文；"
+                          "须重新取得对应范围语料或提供绑定范围、逐字稿哈希和显式证据的复核",
+            })
+    return issues
+
+
+def transcript_source_issues(text: str) -> List[str]:
+    """Reject explicit acquisition placeholders; do not infer completeness by size."""
+    placeholder = re.compile(
+        r"(?m)^\s*[（(]本集音频以音乐/无人声为主，自动听音转录未得到可识别语音。[）)]\s*$")
+    if placeholder.search(text):
+        return ["包含无可识别语音占位段；需复核对应视频/画面来源，不能作为已取得完整来源"]
+    if '语料库回灌' in text and ('等比切片' in text or '非精确对齐' in text):
+        return ["语料库文本按比例切片，未验证原视频身份与时间对齐；需重新核验来源"]
+    if re.search(r'(?m)^\s*>.*本稿\*\*不完整\*\*', text):
+        return ["逐字稿声明不完整；需补齐来源后再写作"]
+    body_lines = [line.strip() for line in text.splitlines() if line.strip()
+                  and not line.lstrip().startswith('#')
+                  and not re.match(r'^\s*>\s*(?:来源|核验|时间轴判据)[：:]', line)
+                  and not re.match(r'^\s*\[(?:听音转录|B站字幕)\s*[·•]', line)]
+    if not body_lines:
+        return ["逐字稿仅有来源头，没有正文"]
+    return []
+
+
 def check_production_workspace(ws: Any) -> List[str]:
     """Final delivery checks, separate from historical formatting-only checks."""
     from src.core.article_body import read_article_body
     from src.core.production import production_report
-    from src.bookcore.checks import check_coverage
-    from src.bookcore.contracts import SourceRange
 
     issues = [f"{i.code}: {i.path} {i.message}" for i in production_report(ws.root_dir).issues
               if i.severity == "error"]
@@ -729,16 +892,22 @@ def check_production_workspace(ws: Any) -> List[str]:
         excluded = plan.get("excluded_pages", {})
         if not isinstance(excluded, dict) or any(not str(v).strip() for v in excluded.values()):
             raise ValueError("excluded_pages must map page numbers to reasons")
-        sources = [SourceRange(str(p["page"]), 0, 1, "page") for p in plan["source"]["parts"]]
-        covered = {str(seg["page"]) for block in blocks
-                   for seg in [*(block.get("segments") or []), *(block.get("units") or [])]
-                   if seg.get("page")}
-        coverage = check_coverage(sources, [SourceRange(page, 0, 1, "page")
-                                          for page in covered | set(excluded)],
-                                  tool="video2book", allow_overlap=True)
-        issues.extend(f"{i.code}: {i.path} {i.message}" for i in coverage.issues)
+        from .source_coverage import plan_coverage
+        issues.extend(plan_coverage(plan))
     except (OSError, ValueError, KeyError, TypeError) as err:
         return [f"block_plan.json: {err}"]
+
+    # Adapter rules add upstream render checks without changing the shared kernel bundle.
+    for folder in ('articles', 'textbooks', 'notes'):
+        for product in (ws.root_dir / folder).glob('*.md'):
+            if product.name.endswith('_TASK.md') or '任务书' in product.name:
+                continue
+            counts = summarize_render(lint_render(product.read_text(encoding='utf-8')))
+            if fatal_render_total(counts):
+                issues.append(f"render: {product.name} {counts}")
+
+    issues.extend("来源范围不可信：" + item["detail"]
+                  for item in check_transcript_ranges_workspace(ws, blocks))
 
     books = sorted((ws.root_dir / "textbooks").glob("*_精读全书.md"))
     if not books:
@@ -749,6 +918,9 @@ def check_production_workspace(ws: Any) -> List[str]:
         transcript = TaskWorkspace.block_path(ws, block)
         if not transcript.is_file() or not transcript.read_text(encoding="utf-8").strip():
             issues.append(f"BLK{bid:02d} 缺少非空逐字稿")
+        else:
+            issues.extend(f"BLK{bid:02d} 来源不完整：{reason}" for reason in
+                          transcript_source_issues(transcript.read_text(encoding="utf-8")))
         article = find_module_article(ws.articles_dir, block)
         if article is None:
             issues.append(f"BLK{bid:02d} 缺少达标长文")

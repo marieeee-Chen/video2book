@@ -485,7 +485,7 @@ def test_run_disambiguates_same_named_chapters(make_workspace, blocks_factory):
     assert "1. 关系数据库（下）（P06上）" in text
     assert "上一节讲完「关系数据库（下）（P06上）」，下一节接着讲「关系数据库（下）（P06下）」" in text
     assert "（P06上）（P06上）" not in text and "（P06下）（P06下）" not in text
-    assert "共 1 讲" in text, "讲数未按去重集号统计（劈分腿被重复计数）"
+    assert "共 1 个分集 / 2 篇长文" in text, "分集与长文必须分别计数"
 
 
 def test_run_skips_block_without_article(make_workspace, blocks_factory, capsys):
@@ -581,3 +581,15 @@ def test_integrator_writes_volume(make_parts, blocks_factory):
     books = _integrator(ws).run(course_title=COURSE, force=True)
     assert [book.name for book in books] == ["模块01_甲_精读全书.md"]
     assert article.exists(), "整编动了 articles/ 里的原文"
+
+
+def test_caption_scope_does_not_claim_measured_audio_or_intervening_pages(make_workspace, blocks_factory):
+    ws = make_workspace('caption-scope')
+    blocks = [blocks_factory(1, [1], '甲', scope_basis='observed_cues'),
+              blocks_factory(2, [3], '乙', scope_basis='observed_cues')]
+    for bid, title in ((1, '甲'), (2, '乙')):
+        _article_with_h1(ws, bid, title, title)
+    book = _integrator(ws).run(course_title=COURSE, blocks=blocks)[0].read_text()
+    assert 'P01、P03' in book and 'P01 ~ P03' not in book
+    assert '音轨完整时长未核验' in book
+    assert '共 2 个分集 / 2 篇长文' in book

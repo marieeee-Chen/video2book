@@ -196,18 +196,13 @@ def export_block_article_task(
 
 
 def page_audio_entries(ws: TaskWorkspace, block: Dict[str, Any], pages: Sequence[int]) -> List[Dict[str, Any]]:
-    """块内指定分集的**分集源音频**条目（不物化、不读文件）。
+    """块内指定分集的听音输入（不物化、不读取音频内容）。
 
     按集源音频是块音频的 concat 素材，整集腿时与块内该段内容逐字节一致；因此
-    「只转录失败的那几集」不需要重新物化任何音频。劈分腿（`P12上`/`P12下`）没有独立
-    文件，回退到整集源音频并带 `start_offset_sec`，由听音通道按区间读。
+    「只转录失败的那几集」不需要重新物化任何音频。split 腿必须使用物化器生成的
+    精确区间文件，不能退回整集音频：没有时间轴的整集补录无法在 merge 时再切分。
     """
     units = [u for u in (block.get("units") or []) if isinstance(u, dict)]
-    分腿页 = {
-        int(u.get("page") or 0)
-        for u in units
-        if str(u.get("label") or "").endswith(("上", "下")) and u.get("split")
-    }
     条目: List[Dict[str, Any]] = []
     for page in pages:
         page = int(page)
@@ -221,12 +216,24 @@ def page_audio_entries(ws: TaskWorkspace, block: Dict[str, Any], pages: Sequence
                 {},
             )
         元数据.setdefault("page", page)
+        split = any(bool(u.get("split")) for u in 腿)
+        audio = BlockPlan.source_audio_path(ws, 元数据)
+        if split:
+            if len(腿) != 1:
+                raise ValueError(f"BLK{int(block.get('block_id') or 0):02d} P{page:02d} 有多条分腿，需独立按区间转录")
+            label = str(腿[0].get("label") or f"P{page:02d}")
+            audio = BlockPlan.blocks_dir(ws) / "_parts" / f"BLK{int(block.get('block_id') or 0):02d}_{label}.m4a"
+            # 缓存块音频可能存在、临时分腿已回收；仅单 unit 的块与分腿范围等价。
+            if not (audio.is_file() and audio.stat().st_size > 0) and len(units) == 1:
+                audio = BlockPlan.audio_path(ws, block)
+            if not (audio.is_file() and audio.stat().st_size > 0):
+                raise ValueError(f"BLK{int(block.get('block_id') or 0):02d} P{page:02d} 缺精确分腿音频；先重新物化，禁止整集补录")
         条目.append({
             "page": page,
             "label": str(腿[0].get("label")) if 腿 else f"P{page:02d}",
             "title": str(元数据.get("title") or f"P{page:02d}"),
-            "audio": str(BlockPlan.source_audio_path(ws, 元数据).resolve()),
-            "split": page in 分腿页,
+            "audio": str(audio.resolve()),
+            "split": split,
             "start_offset_sec": float(腿[0].get("source_offset_sec") or 0.0) if 腿 else 0.0,
             "duration_sec": float(腿[0].get("duration_sec") or 0.0) if 腿 else 0.0,
             "target": str(TaskWorkspace.page_transcript_path(ws, block, page)),
@@ -254,12 +261,12 @@ def export_page_transcribe_task(
     task_file.parent.mkdir(parents=True, exist_ok=True)
 
     audio_rows = "\n".join(
-        f"| P{e['page']:02d} | {e['title']} | `{e['audio']}` | `{e['target']}` |"
+        f"| {e['label']} | {e['title']} | `{e['audio']}` | {e['start_offset_sec']:.2f}–{e['start_offset_sec'] + e['duration_sec']:.2f}s | `{e['target']}` |"
         for e in entries
     )
     table = (
-        "| 集号 | 分集标题 | 分集音频（绝对路径） | 补录稿落盘路径 |\n"
-        "| :--- | :--- | :--- | :--- |\n" + audio_rows
+        "| 分腿 | 分集标题 | 本块分集音频（绝对路径） | 原片范围 | 补录稿落盘路径 |\n"
+        "| :--- | :--- | :--- | :--- | :--- |\n" + audio_rows
     )
     content = (
         f"# BLK{block_id:02d} {span} 按集补录转录任务书（TRANSCRIBE_TASK）\n\n"
@@ -275,6 +282,7 @@ def export_page_transcribe_task(
         f"---\n\n"
         f"## 2. 执行指引\n\n"
         f"1. **逐集转录**（对第 1 节表里**每一行**各转一次，不要只转第一行、也不要早退）：\n"
+        f"   - 分腿输入已切成该块的精确区间；从文件起点读完，不再次施加原片偏移，不读取同页整集替代。\n"
         f"   - **优先 `omni-media-ext:read_media`**：\n"
         f"     `file_path` = 该行的分集音频绝对路径；`mode` = `\"transcribe\"`；\n"
         f"     `prompt` = 第 2.1 节纯文本转录要求（**必须原样传入**）；\n"
@@ -285,7 +293,7 @@ def export_page_transcribe_task(
         f"     宿主的「读文件」能力聆听；`read_audio` 没有 `mode` / `prompt` / `output_file` / `endpoint` 这几个参数）；\n"
         f"2. **落盘补录稿**：`read_media` 未传 `output_file` 时，把该集的完整转录正文写入该行指定的路径；"
         f"`read_audio` 由宿主聆听后自行落盘。\n"
-        f"3. **逐集核对**：确认**每一集**的补录稿都已落盘且非空，再按抬头格式回报单行。\n\n"
+        f"3. **逐集核对**：按工具真实续读回执继续，直到每个输入文件 `is_finished=true`；只取得首片、仅非空不算读完。记录各片实际范围，不臆造正文时间戳，再按抬头格式回报单行。\n\n"
         f"### 2.1 纯文本转录要求（原样传给 `prompt`）\n\n"
         f"```text\n{TRANSCRIBE_INSTRUCTION}\n```\n\n"
         f"---\n\n"

@@ -963,17 +963,18 @@ class BlockPlan:
 
     @classmethod
     def audio_ready(cls, ws: Any, block: Mapping[str, Any]) -> bool:
-        """检查推导出的物理音频是否存在且非空，不打开音频内容。"""
+        """Require an unchanged, decoded cache receipt; this is not transcript approval."""
+        from .audio_materializer import AudioMaterializer
         try:
             target = cls.audio_path(ws, block)
-            if target.is_file() and target.stat().st_size > 0:
+            if AudioMaterializer.cache_matches(target, block):
                 return True
             units = block.get("units") or []
             if len(units) == 1 and bool(units[0].get("split")):
                 label = str(units[0].get("label") or "")
                 block_id = int(block.get("block_id") or 0)
                 sliced = cls.blocks_dir(ws) / "_parts" / f"BLK{block_id:02d}_{label}.m4a"
-                return sliced.is_file() and sliced.stat().st_size > 0
+                return AudioMaterializer.cache_matches(sliced, block)
             return False
         except (OSError, TypeError, ValueError):
             return False

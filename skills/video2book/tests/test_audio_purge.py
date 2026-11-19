@@ -24,6 +24,7 @@ from src.core.audio_materializer import AudioMaterializer
 from src.core.block_plan import BlockPlan
 from src.core.workspace import TaskWorkspace
 from src.pipeline import PipelineCoordinator
+from conftest import cache_receipt_fixture
 
 
 # ---------------------------------------------------------------------------
@@ -47,6 +48,9 @@ def _铺音频(ws) -> list[Path]:
         path.write_bytes(b"a" * 2048)
     # 非音频的同目录文件：必须**原样保留**（证明删除按类型而非按目录）
     (ws.audio_dir / "readme.txt").write_text("保留我", encoding="utf-8")
+    blocks = BlockPlan.load_blocks(ws)
+    for path in made:
+        cache_receipt_fixture(path, {'kind': 'block', 'units': blocks[0]['units']})
     return made
 
 
@@ -63,6 +67,10 @@ def _铺成品(ws, blocks, *, 长文=True, 笔记=True, 教材=True) -> None:
         tb = Path(ws.root_dir) / "textbooks"
         tb.mkdir(parents=True, exist_ok=True)
         (tb / "模块01_某册_精读全书.md").write_text("教材\n", encoding="utf-8")
+    (ws.root_dir / 'audio_release.json').write_text(json.dumps({
+        'decision': 'approved', 'reviewer': 'explicit synthetic fixture',
+        'reason': 'Test-approved retention scope; not a real course review',
+        'dependencies': AudioMaterializer.release_dependencies(ws)}))
 
 
 def TaskWorkspace_article(ws, block) -> Path:

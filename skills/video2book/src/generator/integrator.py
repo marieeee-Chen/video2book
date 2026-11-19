@@ -455,12 +455,14 @@ class ArticleIntegrator:
             print(f"    [i] {out_path.name} 体量 {volume_bytes:,} 字节，超过上限 {cap:,}"
                   f"（该册内含单篇就超过上限的长文，已切无可切）")
 
-        first_span = BlockPlan.span(volume[0][1])
-        last_span = BlockPlan.span(volume[-1][1])
+        explicit_spans = '、'.join(BlockPlan.span(b) for _, b, _, _ in volume)
         # 讲数按**去重集号**统计：劈分腿会让同一集在两个块里各出现一次，直接相加会虚报
         episodes = {int(p) for _, b, _, _ in volume for p in (b.get("episodes") or [])}
         pages = len(episodes)
         minutes = sum(float(b.get("duration_min") or 0.0) for _, b, _, _ in volume)
+        duration_label = (f'{minutes:.0f} 分钟字幕时间戳观察跨度；音轨完整时长未核验'
+                          if any(b.get('scope_basis') for _, b, _, _ in volume)
+                          else f'{minutes:.0f} 分钟计划音频')
         titles = self._display_titles(volume)
 
         # 目录用有序列表：序号是**目录序号**（渲染器不会给列表项自动编号），与「标题不写序号」不冲突。
@@ -477,8 +479,8 @@ class ArticleIntegrator:
             "",
             f"> **所属课程**：{course_title}  ",
             f"> **本册内容**：{book_title}  ",
-            f"> **覆盖范围**：{first_span} ~ {last_span}"
-            f"（共 {pages} 讲 / {len(volume)} 章 / {minutes:.0f} 分钟音频）  ",
+            f"> **覆盖范围**：{explicit_spans}"
+            f"（共 {pages} 个分集 / {len(volume)} 篇长文 / {duration_label}）  ",
         ]
         if volume_count > 1:
             lines.append(f"> **分册说明**：全书按内容分 {volume_count} 册；本册为第 {volume_index} 册  ")
@@ -517,8 +519,8 @@ class ArticleIntegrator:
         lines += [
             "## 本册小结",
             "",
-            f"本册主题为「{book_title}」，整编了 {len(volume)} 个模块（{first_span} ~ {last_span}，"
-            f"共 {pages} 讲 / {minutes:.0f} 分钟音频）。",
+            f"本册主题为「{book_title}」，整编了 {len(volume)} 个模块（{explicit_spans}，"
+            f"共 {pages} 个分集 / {duration_label}）。",
             "建议配合 `notes/` 目录下的复习笔记复盘，需要查证细节时可直接回到本册正文。",
             "",
         ]

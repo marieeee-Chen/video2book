@@ -148,6 +148,9 @@ def test_root_title_file_is_used_and_audio_paths_are_only_derived(make_workspace
     single["span"] = "P01"
     assert BlockPlan.audio_path(ws, single) == expected_single
     expected_single.write_bytes(b"audio")
+    assert BlockPlan.audio_ready(ws, single) is False
+    from conftest import cache_receipt_fixture
+    cache_receipt_fixture(expected_single, {"kind": "source", "part": single["units"][0]["source"]})
     assert BlockPlan.audio_ready(ws, single) is True
     expected_single.write_bytes(b"")
     assert BlockPlan.audio_ready(ws, single) is False

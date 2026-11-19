@@ -276,3 +276,10 @@ def pad_to(text: str, min_bytes: int = 1000) -> str:
 def has_ffmpeg() -> bool:
     import shutil
     return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+
+
+def cache_receipt_fixture(path, identity):
+    """Synthetic prior validation for state/queue tests; real decoding has separate tests."""
+    from src.core.audio_evidence import sha256, receipt_path
+    receipt_path(path).write_text(json.dumps({'schema_version': 1, 'identity': identity,
+        'validation': 'decoded', 'duration_sec': 1., 'sha256': sha256(path), 'inputs': {}}))

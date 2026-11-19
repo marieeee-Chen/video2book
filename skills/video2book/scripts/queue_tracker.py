@@ -27,6 +27,7 @@ from src.core.block_plan import BlockPlan  # noqa: E402
 from src.bookcore.state import activate, output_is_current  # noqa: E402
 from src.core.console import enable_utf8_console  # noqa: E402
 from src.core.constants import DEFAULT_TRANSCRIBE_WORKERS  # noqa: E402
+from src.core.quality_gate import transcript_source_issues  # noqa: E402
 from src.prompts import (  # noqa: E402
     build_article_dispatch_prompt,
     build_note_dispatch_prompt,
@@ -468,6 +469,8 @@ def _module_payload(ws: Path, n: int) -> List[Dict]:
         span = BlockPlan.span(block)
         transcript = subtitles_dir / f"BLK{block_id:02d}_{span}_逐字稿.md"
         if not transcript.exists() or transcript.stat().st_size <= 0:
+            continue
+        if transcript_source_issues(transcript.read_text(encoding="utf-8")):
             continue
         activate(ws, f"article:{block_id}")
         if _find_module_article(articles_dir, block) is not None:

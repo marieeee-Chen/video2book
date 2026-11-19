@@ -308,7 +308,7 @@ def test_textbook_states_covered_span(textbook_probe):
     """册首必须写明本册覆盖的块范围。"""
     ws, block = textbook_probe
     text = _integrate(ws, [block])[0].read_text(encoding="utf-8")
-    assert "覆盖范围**：P01 ~ P01" in text
+    assert "覆盖范围**：P01（共 1 个分集 / 1 篇长文" in text
 
 
 def test_textbook_keeps_article_body(textbook_probe):
@@ -761,7 +761,7 @@ def test_transition_line_uses_disambiguated_titles(duplicate_chapter_probe):
 def test_episode_count_dedupes_split_legs(duplicate_chapter_probe):
     """讲数按去重集号统计：劈分腿不能让同一集被数两遍。"""
     text = _duplicate_chapter_text(duplicate_chapter_probe)
-    assert "共 1 讲" in text
+    assert "共 1 个分集 / 2 篇长文" in text
 
 
 def test_toc_does_not_repeat_span_suffix(duplicate_chapter_probe):

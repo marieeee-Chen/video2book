@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import write_blocks
+from conftest import write_blocks, cache_receipt_fixture
 
 from src.core import budget
 from src.core.block_plan import BlockPlan
@@ -47,6 +47,7 @@ def dispatch_ws(make_workspace, blocks_factory):
     block_audio = BlockPlan.audio_path(ws, block)
     block_audio.parent.mkdir(parents=True, exist_ok=True)
     block_audio.write_bytes(b"x" * 20000)
+    cache_receipt_fixture(block_audio, {"kind": "block", "units": block["units"]})
     return ws
 
 
@@ -252,3 +253,10 @@ def test_suggest_workers_floor_and_cap(minutes, expected):
 ])
 def test_suggest_batch_bundles_short_episodes_only(duration_ms, expected, reason):
     assert budget.suggest_batch([duration_ms] * 20, 20) == expected, reason
+
+
+def test_next_module_skips_unusable_source(run_queue, dispatch_ws):
+    transcript = dispatch_ws.subtitles_dir / 'BLK01_P01-P02_逐字稿.md'
+    transcript.write_text('# 块稿\n\n（本集音频以音乐/无人声为主，自动听音转录未得到可识别语音。）\n', encoding='utf-8')
+    payload = _payload(run_queue('--base-dir', str(dispatch_ws.root_dir), '--next-module', '1', '--json'))
+    assert payload['next'] == []
